@@ -1,0 +1,25 @@
+{
+  "name": "blackstone-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BLACKSTONE online text RPG — accounts, shared profiles, and live city chat",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check js/online.js && node --check js/main.js && node --check js/ui.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "nodemailer": "^7.0.3",
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.5"
+  }
+}

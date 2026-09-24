@@ -1,94 +1,70 @@
-# BLACKSTONE — a text-based city RPG
+# BLACKSTONE — a shared city RPG
 
-A single-player, browser-based text RPG in the tradition of **Torn**: you start as a nobody with
-$2,000 and bare fists, and climb to the top of a rotten city by training your body, pulling crimes,
-fighting in the streets, and working terrible jobs.
+A browser-based, text-style city RPG in the tradition of **Torn**. Build your character, train four stats, work jobs, commit crimes, and fight your way up from the gutter.
 
-No install, no account, no server — it is plain HTML/CSS/JS and it saves to your browser.
+## Online beta
 
-## Run it
+- Email/password accounts with email verification and password reset
+- Account-backed character saves (not just local browser saves)
+- Public player profiles and a casual level/knockout leaderboard
+- Shared live city chat, online presence, and private messages
+- Existing character progression and NPC street combat, inside authenticated accounts
 
-Clone it and serve the folder — there is no build step and no dependencies:
+The Online area is the first multiplayer release. **Competitive duels, item transfers/trading, and co-op activities are not enabled yet:** combat and inventory actions still run in the browser, so a player could alter them with developer tools. Those features need server-authoritative game rules before they can safely affect a shared economy. Current profile-board stats are for fun, not prizes or competition.
+
+## Run locally
+
+Requires Node.js 20 or newer:
 
 ```bash
-git clone https://github.com/lumber12345/blackstone.git
-cd blackstone
-python3 -m http.server 8000        # then open http://localhost:8000
+npm ci
+DEV_AUTO_VERIFY=1 npm run dev
+# open http://localhost:3000
 ```
 
-Any static server works (`npx serve`, `php -S`, nginx, GitHub Pages…). You can even open
-`index.html` straight from disk — the game uses classic `<script>` tags, not ES modules.
+Local development uses an **ephemeral in-memory database** and automatically verifies test accounts. Test accounts and saves disappear when the server stops. This development shortcut is never enabled by the Render production configuration.
 
 ## Deploy on Render
 
-The repo includes a `render.yaml` Blueprint for a static site: no backend, package install, or
-framework build is needed. In Render, choose **New → Blueprint**, connect
-`lumber12345/blackstone`, and apply the Blueprint. It stages only the game files into `dist/` and
-redeploys on pushes to `main`.
+The root `render.yaml` defines a Node web service (`blackstone-online`) plus a Render Postgres database. In Render, choose **New → Blueprint**, connect `lumber12345/blackstone`, and apply the Blueprint. Use the `blackstone-online` URL for the online game; if you previously created a separate static `blackstone` site, it is the old offline version.
 
-Alternatively, create a **Static Site** manually with branch `main`, build command
-`mkdir -p dist && cp index.html dist/ && cp -r css js dist/`, and publish directory `dist`. The
-game saves in the browser's local storage on the Render domain; use **Character → Export save**
-to move a save between domains or browsers.
+### Important: demo database
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/lumber12345/blackstone)
+This Blueprint uses Render's **Free Postgres** because this is a demo. Free Render Postgres expires 30 days after creation; upgrade it before then to retain player accounts and saves ([Render's free-instance limits](https://render.com/docs/free)). Free web instances can also spin down when idle.
 
-### Play it on GitHub Pages
+### Email setup required for real signups
 
-The repo is static-only, so Pages works out of the box: **Settings → Pages → Branch: `main` / root**.
-Your save stays in whichever browser/origin you play from.
+Before players can register, add these environment variables to the `blackstone-online` service in Render. Use credentials from your SMTP email provider; **never put them in GitHub or this repo**.
 
-## The four bars
+- `SMTP_HOST`
+- `SMTP_PORT` (usually 465 or 587)
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM` (the verified sender address)
 
-| Bar | What it does | Refill |
-|---|---|---|
-| ❤️ **Health** | Hit 0 and you wake up in the hospital | ~25/min |
-| ⚡ **Energy** | Training (5), fighting (3), working (5), crimes (1–5) | ~24/min |
-| 🧠 **Nerve** | Crimes and muggings only — the throttle on criminal income | ~12/min |
-| 😊 **Happiness** | Multiplies your damage: ×0.5 at zero, ×1.0 at 100, ×1.5 at 200. Below 20 the gym refuses you | ~6/min |
+Until all five are configured, production signup and password-reset requests stay disabled. Local development logs verification links instead of sending email; Render never returns those links to the browser.
 
-## Systems
+## Account/security notes
 
-- **Gym** — 5 trainers (level-gated) that raise Strength (damage), Defense (mitigation),
-  Speed (swing rate) and Dexterity (accuracy, crits, crime success). Black-market steroids double
-  your gains for 30 minutes.
-- **Crimes** — 8 tiers from Pickpocket to Assassination Contract. Success = base + Dex + level −
-  law suspicion. Failure means a beating, a cell, or nothing. Law suspicion decays slowly and makes
-  every crime harder.
-- **Streets** — 14 enemies across 5 districts, up to Mr. Calloway the Kingpin. Fights run in real
-  time: your attack meter fills based on Speed, and every enemy card shows a **forecast** (your
-  damage/sec, theirs, and a win %) before you commit. You can also mug them instead of fighting.
-- **Jobs** — 6 employers × 3 ranks, 8 shifts a day, promotions as you level.
-- **Market / inventory** — 11 weapons, 5 armors, medical supplies, boosters and fenced loot.
-  Gear is level-gated, so levelling matters as much as money.
-- **Bank** — 0.4%/day interest on savings, 2%/day loans with a level-based credit limit.
-- **Medical** — pay a doctor to skip hospital time, pay bail or break out of jail (Dex-scaled,
-  big XP, failure extends the sentence). Stuck and broke? Scrounge from visitors every 15 minutes.
-- **Achievements** (16), random street events, lifetime statistics, and a per-enemy kill ledger.
+Passwords are stored as scrypt hashes, not plaintext. Login sessions use random, HttpOnly, SameSite cookies; password-reset and verification tokens are stored hashed and expire. Emails are not included in public profiles. Keep `DATABASE_URL` and SMTP values in Render's secret environment settings.
 
-## Controls
+For launch with persistent player data, upgrade the database and configure SMTP before inviting players. After upgrading Postgres, change `DEMO_DATABASE` to `false` in Render to remove the in-game expiry warning. Until the game simulation moves server-side, treat uploaded character saves and leaderboard statistics as untrusted client data.
+
+## Game controls
 
 `1` strike now · `2` use a healing item mid-fight · `3` flee · `?` help
 
-## Files
+## Source layout
 
 ```
-index.html      shell, header bars, nav, modal + toast roots
-css/style.css   all styling (no external assets — works offline)
-js/data.js      every static number: items, enemies, crimes, jobs, trainers, achievements
-js/engine.js    state, save/load, ticking, regen, combat, crimes, gym, bank, achievements
-js/ui.js        page renderers + delegated click handling
-js/main.js      boot, wiring, main loop, autosave
+index.html       account gate + game shell
+css/             game and account styling
+js/data.js       static game balance/content
+js/engine.js     client-side RPG rules and combat
+js/ui.js         pages and game controls
+js/online.js     account UI, cloud sync, social hub and chat client
+js/main.js       account boot, game loop, battle visuals, autosave
+server.js        API, password auth, email flows, sessions, chat and messages
+server/schema.sql Postgres tables
+render.yaml      Render web service + demo Postgres Blueprint
 ```
-
-## Saving
-
-The game autosaves every 15 seconds and on tab close. If your browser blocks local storage
-(sandboxed iframes, private mode) it falls back to session memory and says so in the header —
-use **Character → Export save** to download or copy a save code, and **Import save** to restore it.
-
-## Balancing notes
-
-Numbers were tuned by simulating full playthroughs headlessly: a competent player clears the first
-four districts inside a week of game time and reaches the Kingpin around level 40–58 with
-endgame gear. All damage, regen and price values live in `js/data.js` if you want to retune them.

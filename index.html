@@ -4,13 +4,64 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BLACKSTONE — a text-based city RPG</title>
-<meta name="description" content="A single-player, text-based city RPG in the tradition of Torn: train stats, commit crimes, fight in the streets, work jobs, and climb from the gutter to the Kingpin.">
+<meta name="description" content="A shared text-based city RPG: train, commit crimes, fight, climb the leaderboard, and meet other players in Blackstone.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f0b429'/%3E%3Ctext x='16' y='23' font-size='17' font-family='monospace' font-weight='bold' text-anchor='middle' fill='%230b0f15'%3EBS%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/online.css">
 </head>
 <body>
-<div id="app" class="app">
+<section id="auth-screen" class="auth-screen" aria-label="Account sign in">
+  <div class="auth-card">
+    <div class="auth-brand"><div class="logo">BS</div><div><h1>BLACKSTONE</h1><p>A city that remembers your name.</p></div></div>
+    <div id="auth-notice" class="auth-notice" role="status" aria-live="polite"></div>
+    <div class="auth-tabs" id="auth-tabs">
+      <button class="tab on" type="button" data-auth-view="login">Sign in</button>
+      <button class="tab" type="button" data-auth-view="signup">Create account</button>
+    </div>
+    <form id="auth-login-form" class="auth-form">
+      <label class="fl" for="auth-identity">Email or username</label>
+      <input id="auth-identity" name="identity" autocomplete="username" maxlength="254" required placeholder="e.g. rook_7 or you@example.com">
+      <label class="fl" for="auth-login-password">Password</label>
+      <input id="auth-login-password" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="At least 12 characters">
+      <button class="btn gold wide" type="submit">Enter Blackstone</button>
+      <button class="auth-link" type="button" data-auth-view="forgot">Forgot your password?</button>
+      <button class="auth-link" type="button" data-auth-view="resend">Resend verification email</button>
+    </form>
+    <form id="auth-signup-form" class="auth-form hidden">
+      <label class="fl" for="auth-username">Username</label>
+      <input id="auth-username" name="username" autocomplete="username" minlength="3" maxlength="18" pattern="[A-Za-z0-9_]{3,18}" required placeholder="3–18 letters, numbers, or _">
+      <label class="fl" for="auth-email">Email</label>
+      <input id="auth-email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="you@example.com">
+      <label class="fl" for="auth-signup-password">Password</label>
+      <input id="auth-signup-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="Use 12 or more characters">
+      <button class="btn gold wide" type="submit">Create account</button>
+      <p class="tiny dimmer">We’ll email a verification link. Your email is never shown on your public profile.</p>
+    </form>
+    <form id="auth-forgot-form" class="auth-form hidden">
+      <p class="small dim">Enter the email on your account. If it’s registered, we’ll send a reset link.</p>
+      <label class="fl" for="auth-forgot-email">Email</label>
+      <input id="auth-forgot-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+      <button class="btn gold wide" type="submit">Send reset link</button>
+      <button class="auth-link" type="button" data-auth-view="login">Back to sign in</button>
+    </form>
+    <form id="auth-resend-form" class="auth-form hidden">
+      <p class="small dim">We’ll send a fresh verification link if the address has an unverified account.</p>
+      <label class="fl" for="auth-resend-email">Email</label>
+      <input id="auth-resend-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+      <button class="btn gold wide" type="submit">Resend verification</button>
+      <button class="auth-link" type="button" data-auth-view="login">Back to sign in</button>
+    </form>
+    <form id="auth-reset-form" class="auth-form hidden">
+      <input type="hidden" name="token" id="auth-reset-token">
+      <label class="fl" for="auth-reset-password">New password</label>
+      <input id="auth-reset-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="Use 12 or more characters">
+      <button class="btn gold wide" type="submit">Reset password</button>
+    </form>
+    <div class="auth-foot">Single account · shared city · online saves</div>
+  </div>
+</section>
 
+<div id="app" class="app hidden">
   <header id="hdr">
     <div class="brand">
       <div class="logo">BS</div>
@@ -23,8 +74,10 @@
     <div class="hdr-right">
       <div class="cash"><span id="cash">$0</span><small>on hand</small></div>
       <div class="hdr-btns">
-        <button class="btn tiny ghost" id="btn-save" title="Save now">💾 Save</button>
+        <span id="account-name" class="account-name"></span>
+        <button class="btn tiny ghost" id="btn-save" title="Sync save now">☁️ Sync</button>
         <button class="btn tiny ghost" id="btn-help" title="How to play">❔ Help</button>
+        <button class="btn tiny ghost" id="btn-logout" title="Sign out">Sign out</button>
       </div>
     </div>
   </header>
@@ -37,9 +90,8 @@
   <footer>
     <span id="foot-l">Day 1</span>
     <span id="foot-m"></span>
-    <span id="foot-r">Autosaves locally · nothing leaves your browser</span>
+    <span id="foot-r">Autosaves to your account · email stays private</span>
   </footer>
-
 </div>
 
 <div id="toasts"></div>
@@ -48,6 +100,8 @@
 <script src="js/data.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/ui.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="js/online.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

@@ -146,7 +146,7 @@ function b64decode(b64) {
 E.exportSave = function () { S.lastTick = Date.now(); return b64encode(JSON.stringify(S)); };
 E.importSave = function (text) {
   try {
-    const clean = String(text || '').trim();
+    const clean = (text && typeof text === 'object' ? JSON.stringify(text) : String(text || '')).trim();
     const json = clean.charAt(0) === '{' ? clean : b64decode(clean);
     const d = JSON.parse(json);
     if (!d || typeof d !== 'object' || !d.name) throw new Error('bad save');

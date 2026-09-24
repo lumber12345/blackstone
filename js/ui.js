@@ -80,6 +80,9 @@ const NAV = [
   { group: 'Services', items: [
     { id: 'bank',    label: 'Bank',       icon: '🏦' },
     { id: 'medical', label: 'Medical',    icon: '⚕️' }
+  ]},
+  { group: 'City', items: [
+    { id: 'online',  label: 'Online',     icon: '🌐' }
   ]}
 ];
 
@@ -580,7 +583,7 @@ P.items = function () {
           }).join('')}
           </tbody>
         </table></div>
-        <p class="tiny dimmer" style="margin-top:10px">Sell anything back at 50% from your <a href="#" data-nav="inv" class="gold">inventory</a>. Prices are fixed — there is no player market in this single-player build.</p>
+        <p class="tiny dimmer" style="margin-top:10px">Sell anything back at 50% from your <a href="#" data-nav="inv" class="gold">inventory</a>. Prices are fixed here; player-to-player trading is planned for a later server-authoritative update.</p>
       </div>
     </div>
   </div>`;
@@ -883,6 +886,11 @@ P.profile = function () {
   </div>`;
 };
 
+/* Shared-world page is rendered by the online client module, which owns its live data. */
+P.online = function () {
+  return window.Online ? window.Online.renderPage() : '<div class="page"><div class="panel"><div class="p-body">Online services are loading…</div></div></div>';
+};
+
 /* ---------------- render ---------------- */
 UI.render = function (force) {
   if (!E.state() || !UI.ready) return;
@@ -958,18 +966,18 @@ const ACTS = {
     UI.modal('✏️ Change name', `<label class="fl">Street name</label><input type="text" id="newname" maxlength="18" value="${U.esc(E.state().name)}">`,
       '<button class="btn ghost" data-close="1">Cancel</button><button class="btn gold" data-okname="1">Save</button>',
       { onMount: r => { const inp = r.querySelector('#newname'); inp.focus(); inp.select();
-        r.querySelector('[data-okname]').onclick = () => { const v = inp.value.trim().slice(0, 18); if (v) E.state().name = v; UI.closeModal(); UI.render(true); E.save(true); }; } });
+        r.querySelector('[data-okname]').onclick = () => { const v = inp.value.trim().slice(0, 18); if (v) E.state().name = v; UI.closeModal(); UI.render(true); E.save(true); if (window.Online) Online.queueSave(); }; } });
   },
   reavatar: () => {
     UI.modal('🎭 Choose a face', `<div class="grid g4">${DATA.AVATARS.map(a => `<button class="btn ghost" style="font-size:24px;padding:12px" data-av="${a}">${a}</button>`).join('')}</div>`,
       '<button class="btn ghost" data-close="1">Cancel</button>',
-      { onMount: r => r.querySelectorAll('[data-av]').forEach(b => b.onclick = () => { E.state().avatar = b.dataset.av; UI.closeModal(); UI.render(true); E.save(true); }) });
+      { onMount: r => r.querySelectorAll('[data-av]').forEach(b => b.onclick = () => { E.state().avatar = b.dataset.av; UI.closeModal(); UI.render(true); E.save(true); if (window.Online) Online.queueSave(); }) });
   },
   export: () => {
     const code = E.exportSave();
     UI.modal('💾 Save file', `
       <p class="small dim">Copy this code (or download it) to keep your character. Paste it back later with <b>Import</b>.</p>
-      ${E.storageOK() ? '' : '<div class="warnmsg" style="margin-bottom:10px">⚠️ This browser is blocking local storage, so your game only lives in this tab. Export now if you want to keep it.</div>'}
+      <div class="infomsg" style="margin-bottom:10px">Your account is the main save. This export is a portable backup; importing it replaces your current character on this account.</div>
       <textarea id="save-code" rows="6" spellcheck="false" style="font-family:var(--mono);font-size:10.5px;word-break:break-all">${code}</textarea>
       <div class="btn-row" style="margin-top:10px">
         <button class="btn sm blue" data-copy="1">📋 Copy code</button>
@@ -991,9 +999,13 @@ const ACTS = {
         r.querySelector('[data-doimp]').onclick = () => { if (E.importSave(ta.value)) { UI.closeModal(); UI.page = 'home'; UI.render(true); } }; } });
   },
   hardreset: () => {
-    UI.modal('🗑️ Start over?', '<p>This wipes your character, money, stats and achievements from this browser. There is no undo.</p>',
-      '<button class="btn ghost" data-close="1">Cancel</button><button class="btn red" data-wipe="1">Wipe everything</button>',
-      { onMount: r => r.querySelector('[data-wipe]').onclick = () => { UI.closeModal(); E.hardReset(); location.reload(); } });
+    UI.modal('🗑️ Start over?', '<p>This permanently deletes your character, money, stats and achievements from your online account on every device. There is no undo.</p>',
+      '<button class="btn ghost" data-close="1">Cancel</button><button class="btn red" data-wipe="1">Delete character</button>',
+      { onMount: r => r.querySelector('[data-wipe]').onclick = async () => {
+        UI.closeModal();
+        const ok = window.Online ? await Online.deleteSave() : true;
+        if (ok) { E.hardReset(); location.reload(); }
+      } });
   }
 };
 
@@ -1067,7 +1079,7 @@ UI.help = function () {
     <li><b>Pay bail</b> or <b>pay the doctor</b> to skip the wait entirely.</li>
     <li><b>Law suspicion</b> rises with crime and lowers your success chance; it decays slowly over time.</li>
   </ul>
-  <p class="tiny dimmer" style="margin-top:12px">Progress autosaves to this browser every 15 seconds and when you close the tab. Time keeps moving while you are away (regen only — you cannot be attacked offline).</p>`,
+  <p class="tiny dimmer" style="margin-top:12px">Progress autosaves to your account every 15 seconds and after actions. This version also has public player profiles, a city board, direct messages, and live chat. Time keeps moving while you are away (regen only — you cannot be attacked offline).</p>`,
     '<button class="btn gold" data-close="1">Got it</button>', { width: 'min(660px,100%)' });
 };
 
@@ -1099,6 +1111,7 @@ UI.create = function () {
         E.log('You arrived in Blackstone with $2,000 and no reputation.', 'gold');
         UI.page = 'home';
         UI.render(true);
+        if (window.Online && Online.onGameCreated) Online.onGameCreated();
         setTimeout(() => UI.help(), 400);
       };
       r.querySelector('#cc-go').onclick = start;

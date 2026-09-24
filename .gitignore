@@ -4,17 +4,20 @@ Thumbs.db
 *.swp
 *~
 
-# dependencies & builds (the game itself has none)
+# Node
 node_modules/
-package-lock.json
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Generated build output and local play data
 dist/
 build/
-
-# local play data — saves live in the browser, never in git
 *.save.txt
 blackstone-save.txt
 saves/
 
-# test harness scratch
-/tests/out/
+# Test artifacts
 coverage/

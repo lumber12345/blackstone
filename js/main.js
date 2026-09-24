@@ -1,10 +1,9 @@
 /* =========================================================
-   BLACKSTONE — boot
+   BLACKSTONE — online boot
    ========================================================= */
 'use strict';
 
 (function boot() {
-  /* ---- engine -> ui wiring ---- */
   E.on('toast', t => toastLocal(t));
   function toastLocal(t) {
     const box = document.getElementById('toasts');
@@ -18,7 +17,7 @@
   }
 
   E.on('battlestart', () => { UI.page = 'streets'; UI.dirty = true; UI.render(true); });
-  E.on('battletick', () => { /* lightweight DOM updates only */ });
+  E.on('battletick', () => { /* battle DOM is patched by the fast loop */ });
   E.on('battledmg', p => {
     const id = p.who === 'you' ? 'c-you' : 'c-foe';
     const node = document.getElementById(id);
@@ -38,68 +37,93 @@
     const node = document.getElementById(who === 'you' ? 'c-you' : 'c-foe');
     if (!node) return;
     const pop = document.createElement('div');
-    pop.className = 'pop';
-    pop.style.color = '#8697ab';
-    pop.style.fontSize = '16px';
-    pop.textContent = 'miss';
-    node.appendChild(pop);
-    setTimeout(() => pop.remove(), 1000);
+    pop.className = 'pop'; pop.style.color = '#8697ab'; pop.style.fontSize = '16px'; pop.textContent = 'miss';
+    node.appendChild(pop); setTimeout(() => pop.remove(), 1000);
   });
-  E.on('battleend', () => { UI.dirty = true; UI.render(true); });
-  E.on('changed', () => {
-    if (UI.page === 'streets' && E.battle) UI.dirty = true;
-  });
-  E.on('tick', () => {
-    if (E.battle) updateBattleBars();
-  });
+  E.on('battleend', () => { UI.dirty = true; UI.render(true); Online.queueSave(100); });
+  E.on('changed', () => { if (UI.page === 'streets' && E.battle) UI.dirty = true; });
+  E.on('tick', () => { if (E.battle) updateBattleBars(); });
 
   function updateBattleBars() {
     const B = E.battle; if (!B) return;
     const S = E.state();
     const php = document.getElementById('b-php');
     if (php) {
-      php.textContent = `${U.fmt(S.hp)} / ${U.fmt(E.maxHP())}`;
+      const value = `${U.fmt(S.hp)} / ${U.fmt(E.maxHP())}`;
+      if (php.textContent !== value) php.textContent = value;
       const f = document.getElementById('b-phpf');
-      if (f) f.style.width = U.pct(S.hp, E.maxHP()) + '%';
+      const width = U.pct(S.hp, E.maxHP()) + '%';
+      if (f && f.style.width !== width) f.style.width = width;
     }
   }
 
-  /* ---- header buttons ---- */
-  document.getElementById('btn-save').addEventListener('click', () => E.save());
-  if (!E.storageOK()) {
-    const tag = document.getElementById('tagline');
-    if (tag) tag.textContent = 'session only — export your save to keep it';
-  }
   document.getElementById('btn-help').addEventListener('click', () => UI.help());
-  window.addEventListener('beforeunload', () => { if (E.state()) E.save(true); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden && E.state()) E.save(true); });
+  window.addEventListener('beforeunload', () => {
+    if (E.state()) { E.save(true); Online.syncSave(true); }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && E.state()) { E.save(true); Online.syncSave(true); }
+  });
 
-  /* ---- boot screen ---- */
-  const main = document.getElementById('main');
-  if (E.hasSave() && E.load()) {
-    const S = E.state();
-    const away = E.applyOffline();
-    UI.page = S.page && typeof S.page === 'string' ? S.page : 'home';
-    if (UI.page === 'streets' && !E.battle) UI.page = 'home';
-    main.innerHTML = `<div class="panel"><div class="p-body" style="text-align:center;padding:44px 20px">
-      <div style="font-size:52px">${S.avatar}</div>
-      <h3 style="font-size:24px;margin-top:8px">${U.esc(S.name)}</h3>
-      <p class="dim">Level ${S.level} · ${U.money(S.money)} on hand · Day ${E.day()}</p>
-      <p class="tiny dimmer">${away > 120 ? `You were away for ${U.dur(away)}. ` : ''}Time kept moving while you were gone.</p>
-      <button class="btn gold" id="boot-go" style="margin-top:16px;padding:13px 26px;font-size:15px">Enter Blackstone</button>
-      <div style="margin-top:14px"><button class="btn tiny ghost" id="boot-wipe">Wipe save &amp; start a new character</button></div>
-    </div></div>`;
-    document.getElementById('boot-go').addEventListener('click', () => { UI.ready = true; UI.render(true); setTimeout(() => toastLocal({ title: 'Welcome back', msg: `${U.esc(S.name)} — the city missed you.`, kind: 'gold' }), 200); });
-    document.getElementById('boot-wipe').addEventListener('click', () => { E.hardReset(); location.reload(); });
-  } else {
-    main.innerHTML = `<div class="panel"><div class="p-body" style="text-align:center;padding:44px 20px">
-      <div style="font:800 34px/1 var(--mono);letter-spacing:6px;color:#fff">BLACKSTONE</div>
-      <p class="dim" style="margin-top:10px">A text-based city RPG. Train. Steal. Fight. Get rich or get buried.</p>
-    </div></div>`;
-    UI.create();
+  function enterOnline(data) {
+    if (!data || !data.user) return;
+    const auth = document.getElementById('auth-screen');
+    const app = document.getElementById('app');
+    auth.classList.add('hidden'); app.classList.remove('hidden');
+    document.getElementById('account-name').textContent = '@' + data.user.username;
+    const tag = document.getElementById('tagline');
+    if (tag) tag.textContent = 'shared city · online account';
+
+    let localSave = null;
+    if (!data.save && E.hasSave() && E.load()) localSave = JSON.parse(JSON.stringify(E.state()));
+    E.hardReset();
+    UI.ready = false;
+    E.battle = null;
+    if (data.save && E.importSave(data.save)) {
+      const S = E.state();
+      const away = E.applyOffline();
+      UI.page = S.page && typeof S.page === 'string' ? S.page : 'home';
+      if (UI.page === 'streets') UI.page = 'home';
+      UI.ready = true;
+      UI.render(true);
+      if (away > 120) setTimeout(() => toastLocal({ title: 'Welcome back', msg: `You were away for ${U.dur(away)}. Time kept moving in the city.`, kind: 'info' }), 200);
+    } else if (localSave) {
+      UI.page = 'home';
+      document.getElementById('main').replaceChildren();
+      const localLabel = `${U.esc(localSave.name || 'Unnamed character')} · level ${Math.max(1, Number(localSave.level) || 1)}`;
+      UI.modal('📦 Import this browser save?', `<p class="small">Found <b class="gold">${localLabel}</b> in this browser. Import it into this account, or start with a fresh character. Choosing Import uploads the save to your account.</p>`,
+        '<button class="btn ghost" data-fresh-local="1">Start fresh</button><button class="btn gold" data-import-local="1">Import character</button>',
+        { noClose: true, width: 'min(500px,100%)', onMount: root => {
+          root.querySelector('[data-import-local]').onclick = () => {
+            UI.closeModal();
+            if (E.importSave(localSave)) { UI.page = 'home'; UI.ready = true; UI.render(true); Online.syncSave(); }
+            else UI.create();
+          };
+          root.querySelector('[data-fresh-local]').onclick = () => { UI.closeModal(); E.hardReset(); UI.create(); };
+        } });
+    } else {
+      UI.page = 'home';
+      document.getElementById('main').replaceChildren();
+      UI.create();
+    }
+    Online.connect();
+    Online.refreshHub();
   }
 
-  /* ---- main loop ---- */
+  function leaveOnline() {
+    UI.ready = false;
+    E.battle = null;
+    E.hardReset();
+    UI.page = 'home';
+    document.getElementById('main').replaceChildren();
+    document.getElementById('account-name').textContent = '';
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('auth-screen').classList.remove('hidden');
+  }
+  window.addEventListener('blackstone:authenticated', ev => enterOnline(ev.detail));
+  window.addEventListener('blackstone:logout', leaveOnline);
+
+  /* One-second game clock updates the existing DOM in place. */
   setInterval(() => {
     if (!E.state()) return;
     E.tick();
@@ -107,7 +131,7 @@
     UI.render(false);
   }, 1000);
 
-  /* fast visual loop for battle meters (no re-render) */
+  /* Fast battle meters; these only change text/width, never replace the combat screen. */
   setInterval(() => {
     if (!E.state() || !E.battle) return;
     const B = E.battle;
@@ -118,6 +142,11 @@
     set('b-timer', U.durShort(B.t));
   }, 90);
 
-  /* ---- autosave ---- */
-  setInterval(() => { if (E.state()) E.save(true); }, 15000);
+  /* Autosave locally as cache and to the account-backed server. */
+  setInterval(() => {
+    if (!E.state()) return;
+    E.save(true); Online.syncSave();
+  }, 15000);
+
+  Online.bootstrap();
 })();

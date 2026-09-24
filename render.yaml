@@ -1,18 +1,29 @@
 services:
   - type: web
-    name: blackstone
-    runtime: static
+    name: blackstone-online
+    runtime: node
+    region: oregon
+    plan: free
     branch: main
     autoDeployTrigger: commit
-    buildCommand: mkdir -p dist && cp index.html dist/ && cp -r css js dist/
-    staticPublishPath: ./dist
-    headers:
-      - path: /*
-        name: X-Content-Type-Options
-        value: nosniff
-      - path: /*
-        name: Referrer-Policy
-        value: strict-origin-when-cross-origin
-      - path: /*
-        name: Permissions-Policy
-        value: camera=(), microphone=(), geolocation=()
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_DATABASE
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blackstone-db
+          property: connectionString
+
+# DEMO ONLY: Render's Free Postgres expires after 30 days. Upgrade before
+# storing player accounts you need to keep.
+databases:
+  - name: blackstone-db
+    databaseName: blackstone
+    user: blackstone
+    plan: free
+    region: oregon
