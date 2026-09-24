@@ -11,8 +11,8 @@ No install, no account, no server — it is plain HTML/CSS/JS and it saves to yo
 Clone it and serve the folder — there is no build step and no dependencies:
 
 ```bash
-git clone https://github.com/<you>/lumbercorp.git
-cd lumbercorp
+git clone https://github.com/<your-username>/blackstone.git
+cd blackstone
 python3 -m http.server 8000        # then open http://localhost:8000
 ```
 
