@@ -19,6 +19,20 @@ python3 -m http.server 8000        # then open http://localhost:8000
 Any static server works (`npx serve`, `php -S`, nginx, GitHub Pages…). You can even open
 `index.html` straight from disk — the game uses classic `<script>` tags, not ES modules.
 
+## Deploy on Render
+
+The repo includes a `render.yaml` Blueprint for a static site: no backend, package install, or
+framework build is needed. In Render, choose **New → Blueprint**, connect
+`lumber12345/blackstone`, and apply the Blueprint. It stages only the game files into `dist/` and
+redeploys on pushes to `main`.
+
+Alternatively, create a **Static Site** manually with branch `main`, build command
+`mkdir -p dist && cp index.html dist/ && cp -r css js dist/`, and publish directory `dist`. The
+game saves in the browser's local storage on the Render domain; use **Character → Export save**
+to move a save between domains or browsers.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/lumber12345/blackstone)
+
 ### Play it on GitHub Pages
 
 The repo is static-only, so Pages works out of the box: **Settings → Pages → Branch: `main` / root**.
