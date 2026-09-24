@@ -67,9 +67,12 @@ const io = new Server(server, {
   }
 });
 
-const mailConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT &&
+const resendConfigured = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM);
+const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT &&
   process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_FROM);
-const mailer = mailConfigured ? nodemailer.createTransport({
+const mailProvider = resendConfigured ? 'resend' : smtpConfigured ? 'smtp' : null;
+const mailConfigured = Boolean(mailProvider);
+const mailer = smtpConfigured && !resendConfigured ? nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT),
   secure: Number(process.env.SMTP_PORT) === 465,
@@ -161,11 +164,28 @@ function originFor(req) {
   return `${req.protocol}://${req.get('host')}`;
 }
 async function sendMail({ to, subject, text, html, devUrl }) {
+  if (resendConfigured) {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ from: process.env.RESEND_FROM, to: [to], subject, text, html }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof result.message === 'string' ? result.message : `HTTP ${response.status}`;
+      throw new Error(`Resend email API rejected the request: ${detail}`);
+    }
+    return result;
+  }
   if (mailer) {
     await mailer.sendMail({ from: process.env.SMTP_FROM, to, subject, text, html });
     return;
   }
-  if (IS_PROD) throw new Error('SMTP is not configured. Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM in Render.');
+  if (IS_PROD) throw new Error('Email delivery is not configured. On Render Free, set RESEND_API_KEY and RESEND_FROM; otherwise configure SMTP on a plan that allows outbound SMTP.');
   console.log(`\n[DEV EMAIL] To: ${to}\nSubject: ${subject}\n${devUrl || text}\n`);
 }
 
@@ -203,7 +223,7 @@ app.use('/api', (req, res, next) => {
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
   await pool.query('SELECT 1');
-  res.json({ ok: true, database: demoDb ? 'ephemeral-demo' : 'postgres', temporaryDatabase: process.env.DEMO_DATABASE === 'true', emailConfigured: mailConfigured });
+  res.json({ ok: true, database: demoDb ? 'ephemeral-demo' : 'postgres', temporaryDatabase: process.env.DEMO_DATABASE === 'true', emailConfigured: mailConfigured, emailProvider: mailProvider });
 }));
 
 app.get('/api/auth/me', asyncRoute(async (req, res) => {
@@ -214,7 +234,7 @@ app.get('/api/auth/me', asyncRoute(async (req, res) => {
 }));
 
 app.post('/api/auth/signup', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  if (IS_PROD && !mailer) return jsonError(res, 503, 'Email signup is not available yet. The game owner must configure SMTP email in Render.');
+  if (IS_PROD && !mailConfigured) return jsonError(res, 503, 'Email signup is unavailable until an email provider is configured. On Render Free, add Resend HTTPS API credentials in Render.');
   const username = String(req.body.username || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
@@ -250,7 +270,7 @@ app.post('/api/auth/signup', rateLimit({ max: 5, windowMs: 15 * 60_000 }), async
 }));
 
 app.post('/api/auth/resend-verification', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  if (IS_PROD && !mailer) return jsonError(res, 503, 'Email signup is not available yet. The game owner must configure SMTP email in Render.');
+  if (IS_PROD && !mailConfigured) return jsonError(res, 503, 'Email signup is unavailable until an email provider is configured. On Render Free, add Resend HTTPS API credentials in Render.');
   const email = String((req.body || {}).email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError(res, 400, 'Enter a valid email address.');
   const { rows } = await pool.query('SELECT id,verified_at FROM users WHERE email_key=$1', [email]);
@@ -302,7 +322,7 @@ app.post('/api/auth/logout', asyncRoute(async (req, res) => {
 app.post('/api/auth/forgot', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError(res, 400, 'Enter a valid email address.');
-  if (IS_PROD && !mailer) return jsonError(res, 503, 'Password reset email is not configured yet.');
+  if (IS_PROD && !mailConfigured) return jsonError(res, 503, 'Password reset email is unavailable until an email provider is configured.');
   const { rows } = await pool.query('SELECT id FROM users WHERE email_key=$1 AND verified_at IS NOT NULL', [email]);
   if (rows[0]) {
     const token = randomToken(), expires = new Date(Date.now() + RESET_MS);
@@ -516,7 +536,7 @@ app.use((err, _req, res, _next) => {
 initDatabase().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`BLACKSTONE online listening on 0.0.0.0:${PORT}${demoDb ? ' (ephemeral in-memory database)' : ''}`);
-    if (!mailConfigured) console.warn('SMTP is not configured: production account signup/password reset will remain disabled.');
+    if (!mailConfigured) console.warn('Email delivery is not configured: set RESEND_API_KEY and RESEND_FROM or configure SMTP.');
   });
 }).catch(err => {
   console.error('Database initialization failed:', err);

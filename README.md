@@ -34,21 +34,24 @@ This Blueprint uses Render's **Free Postgres** because this is a demo. Free Rend
 
 ### Email setup required for real signups
 
-Before players can register, add these environment variables to the `blackstone-online` service in Render. Use credentials from your SMTP email provider; **never put them in GitHub or this repo**.
+The Render Blueprint uses a **Free web service**. Render blocks outbound SMTP traffic on ports 25, 465, and 587 for Free web services ([Render limits](https://render.com/docs/free)), so valid SMTP credentials alone will not deliver mail from this plan. For the Free demo, use an email provider's HTTPS API; this project supports [Resend](https://resend.com/docs/api-reference/emails/send-email).
 
-- `SMTP_HOST`
-- `SMTP_PORT` (usually 465 or 587)
-- `SMTP_USER`
-- `SMTP_PASS`
-- `SMTP_FROM` (the verified sender address)
+Add these environment variables to the `blackstone-online` service in Render:
 
-Until all five are configured, production signup and password-reset requests stay disabled. Local development logs verification links instead of sending email; Render never returns those links to the browser.
+- `RESEND_API_KEY` — secret API key from Resend
+- `RESEND_FROM` — sender identity on a domain verified with Resend, e.g. `BLACKSTONE <noreply@your-domain.example>`
+
+The app sends verification and reset email through Resend's HTTPS API on port 443. **Never put the API key in GitHub or this repo.** If both Resend and SMTP are configured, Resend is used.
+
+SMTP remains available on hosts/plans that allow outbound SMTP, using `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`. In local development, `DEV_AUTO_VERIFY=1` skips email; without it, verification links are logged to the server console instead of being delivered.
+
+Check `https://<your-service>.onrender.com/api/health`: `emailConfigured` should be `true` and `emailProvider` should be `resend`. This only confirms that the variables exist; if delivery still fails, check the Render service logs for the provider's HTTP error and verify your Resend sender/domain.
 
 ## Account/security notes
 
-Passwords are stored as scrypt hashes, not plaintext. Login sessions use random, HttpOnly, SameSite cookies; password-reset and verification tokens are stored hashed and expire. Emails are not included in public profiles. Keep `DATABASE_URL` and SMTP values in Render's secret environment settings.
+Passwords are stored as scrypt hashes, not plaintext. Login sessions use random, HttpOnly, SameSite cookies; password-reset and verification tokens are stored hashed and expire. Emails are not included in public profiles. Keep `DATABASE_URL`, `RESEND_API_KEY`, and any SMTP values in Render's secret environment settings.
 
-For launch with persistent player data, upgrade the database and configure SMTP before inviting players. After upgrading Postgres, change `DEMO_DATABASE` to `false` in Render to remove the in-game expiry warning. Until the game simulation moves server-side, treat uploaded character saves and leaderboard statistics as untrusted client data.
+For launch with persistent player data, upgrade the database and configure an email provider before inviting players. After upgrading Postgres, change `DEMO_DATABASE` to `false` in Render to remove the in-game expiry warning. Until the game simulation moves server-side, treat uploaded character saves and leaderboard statistics as untrusted client data.
 
 ## Game controls
 
