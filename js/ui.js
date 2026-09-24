@@ -17,6 +17,52 @@ const el = {
   get modal() { return $('#modal-root'); }
 };
 
+/* Patch generated markup in place instead of replacing an entire screen every second.
+   Keeping existing nodes avoids visible flashes and preserves focus/input state. */
+function patchChildren(currentParent, nextParent) {
+  const current = Array.from(currentParent.childNodes);
+  const next = Array.from(nextParent.childNodes);
+  const len = Math.max(current.length, next.length);
+  for (let i = 0; i < len; i++) {
+    const oldNode = current[i], newNode = next[i];
+    if (!oldNode) { currentParent.appendChild(newNode.cloneNode(true)); continue; }
+    if (!newNode) { oldNode.remove(); continue; }
+    patchNode(oldNode, newNode);
+  }
+}
+function patchNode(oldNode, newNode) {
+  if (oldNode.isEqualNode(newNode)) return;
+  if (oldNode.nodeType !== newNode.nodeType ||
+      (oldNode.nodeType === 1 && oldNode.tagName !== newNode.tagName)) {
+    oldNode.replaceWith(newNode.cloneNode(true));
+    return;
+  }
+  if (oldNode.nodeType === 3 || oldNode.nodeType === 8) {
+    oldNode.nodeValue = newNode.nodeValue;
+    return;
+  }
+  if (oldNode.nodeType !== 1) return;
+
+  const keepInputValue = oldNode === document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(oldNode.tagName);
+  Array.from(oldNode.attributes).forEach(a => {
+    if (!newNode.hasAttribute(a.name)) oldNode.removeAttribute(a.name);
+  });
+  Array.from(newNode.attributes).forEach(a => {
+    if (keepInputValue && a.name === 'value') return;
+    if (oldNode.getAttribute(a.name) !== a.value) oldNode.setAttribute(a.name, a.value);
+  });
+  patchChildren(oldNode, newNode);
+}
+function patchHTML(root, html) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  patchChildren(root, template.content);
+}
+function setText(node, value) {
+  value = String(value);
+  if (node && node.textContent !== value) node.textContent = value;
+}
+
 /* ---------------- nav ---------------- */
 const NAV = [
   { group: 'You', items: [
@@ -49,19 +95,33 @@ function barHTML(id, label, val, max, cls, fmtVal) {
 function updateBars() {
   const S = E.state();
   const hpMax = E.maxHP(), enMax = E.maxEnergy(), nvMax = E.maxNerve(), haMax = U.maxHappy();
-  el.bars.innerHTML =
+  if (!document.getElementById('bar-hp')) patchHTML(el.bars,
     barHTML('hp', '❤️ Health', S.hp, hpMax, 'hp') +
     barHTML('en', '⚡ Energy', S.energy, enMax, 'en') +
     barHTML('nv', '🧠 Nerve', S.nerve, nvMax, 'nv') +
-    barHTML('ha', '😊 Happy', S.happy, haMax, 'ha');
-  el.cash.textContent = U.money(S.money);
-  el.footL.textContent = `Day ${E.day()} · Lvl ${S.level} · ${S.name}`;
+    barHTML('ha', '😊 Happy', S.happy, haMax, 'ha'));
+  [
+    ['hp', S.hp, hpMax], ['en', S.energy, enMax],
+    ['nv', S.nerve, nvMax], ['ha', S.happy, haMax]
+  ].forEach(([id, value, max]) => {
+    const root = document.getElementById('bar-' + id);
+    if (!root) return;
+    const label = root.querySelector('.lbl b');
+    const track = root.querySelector('.track');
+    const fill = root.querySelector('.fill');
+    const p = U.pct(value, max);
+    if (label) label.textContent = `${U.fmt(value)} / ${U.fmt(max)}`;
+    if (track) track.classList.toggle('low', p <= 20);
+    if (fill && fill.style.width !== p + '%') fill.style.width = p + '%';
+  });
+  setText(el.cash, U.money(S.money));
+  setText(el.footL, `Day ${E.day()} · Lvl ${S.level} · ${S.name}`);
   const bits = [];
   if (E.inHospital()) bits.push(`🏥 hospital ${U.durShort((S.hospitalUntil - Date.now()) / 1000)}`);
   if (E.inJail()) bits.push(`🔒 jail ${U.durShort((S.jailUntil - Date.now()) / 1000)}`);
   if (S.burn > 0) bits.push(`🔥 burning ${U.durShort(S.burn)}`);
   if (S.steroidUntil > Date.now()) bits.push(`🧪 stims ${U.durShort((S.steroidUntil - Date.now()) / 1000)}`);
-  el.footM.textContent = bits.join('   ·   ');
+  setText(el.footM, bits.join('   ·   '));
 }
 
 function renderNav() {
@@ -76,7 +136,7 @@ function renderNav() {
       h += `<a href="#" data-nav="${it.id}" class="${UI.page === it.id ? 'active' : ''}"><span class="ic">${it.icon}</span>${it.label}${tag}</a>`;
     });
   });
-  el.nav.innerHTML = h;
+  patchHTML(el.nav, h);
 }
 
 /* ---------------- toasts ---------------- */
@@ -455,22 +515,22 @@ P.battle = function () {
 function updateBattleDOM() {
   const B = E.battle;
   if (!B || UI.page !== 'streets') return;
-  const set = (id, html) => { const n = document.getElementById(id); if (n) n.innerHTML = html; };
-  const wid = (id, p) => { const n = document.getElementById(id); if (n) n.style.width = p + '%'; };
+  const set = (id, text) => setText(document.getElementById(id), text);
+  const wid = (id, p) => { const n = document.getElementById(id); if (n && n.style.width !== p + '%') n.style.width = p + '%'; };
   set('b-php', `${U.fmt(B.php)} / ${U.fmt(B.phpMax)}`); wid('b-phpf', U.pct(B.php, B.phpMax));
   set('b-ehp', `${U.fmt(B.ehp)} / ${U.fmt(B.ehpMax)}`); wid('b-ehpf', U.pct(B.ehp, B.ehpMax));
   set('b-pmt', Math.round(U.pct(B.pMeter, B.pNeed)) + '%'); wid('b-pmf', U.pct(B.pMeter, B.pNeed));
   set('b-emt', Math.round(U.pct(B.eMeter, B.eNeed)) + '%'); wid('b-emf', U.pct(B.eMeter, B.eNeed));
   set('b-timer', U.durShort(B.t));
   const ps = document.getElementById('b-pstatus');
-  if (ps) ps.innerHTML = (E.state().burn > 0 ? '<span class="pill red">🔥 burning</span>' : '') +
-    `<span class="pill">dmg ≈ ${U.fmt(E.battleStats().dmg)}</span><span class="pill">def ${U.fmt(E.battleStats().def)}</span>`;
+  if (ps) patchHTML(ps, (E.state().burn > 0 ? '<span class="pill red">🔥 burning</span>' : '') +
+    `<span class="pill">dmg ≈ ${U.fmt(E.battleStats().dmg)}</span><span class="pill">def ${U.fmt(E.battleStats().def)}</span>`);
   const blog = document.getElementById('blog');
   if (blog) {
     const want = B.log.slice(-60).map(l => `<div class="${l.cls}">${l.text}</div>`).join('');
     if (blog.dataset.sig !== String(B.log.length)) {
       blog.dataset.sig = String(B.log.length);
-      blog.innerHTML = want;
+      patchHTML(blog, want);
       blog.scrollTop = blog.scrollHeight;
     }
   }
@@ -829,11 +889,11 @@ UI.render = function (force) {
   updateBars();
   renderNav();
   if (UI.page === 'streets' && E.battle) {
-    if (force || UI.dirty) { el.main.innerHTML = P.battle(); UI.dirty = false; scrollLog(); }
+    if (force || UI.dirty) { patchHTML(el.main, P.battle()); UI.dirty = false; scrollLog(); }
     else updateBattleDOM();
   } else {
     const fn = P[UI.page] || P.home;
-    el.main.innerHTML = fn();
+    patchHTML(el.main, fn());
   }
 };
 function scrollLog() { const b = document.getElementById('blog'); if (b) b.scrollTop = b.scrollHeight; }

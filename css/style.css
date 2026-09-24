@@ -66,8 +66,7 @@ body{
 .fill.nv{background:linear-gradient(90deg,#1c4d80,var(--nv))}
 .fill.ha{background:linear-gradient(90deg,#8a6410,var(--ha))}
 .fill.xp{background:linear-gradient(90deg,#4b2f80,var(--purple))}
-.track.low .fill{animation:pulse 1s infinite}
-@keyframes pulse{50%{opacity:.45}}
+.track.low{border-color:rgba(255,95,99,.38)}
 
 .hdr-right{display:flex;align-items:center;gap:12px}
 .cash{text-align:right;line-height:1.1}

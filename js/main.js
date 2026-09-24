@@ -111,8 +111,8 @@
   setInterval(() => {
     if (!E.state() || !E.battle) return;
     const B = E.battle;
-    const set = (id, v) => { const n = document.getElementById(id); if (n) n.textContent = v; };
-    const wid = (id, p) => { const n = document.getElementById(id); if (n) n.style.width = p + '%'; };
+    const set = (id, v) => { const n = document.getElementById(id); v = String(v); if (n && n.textContent !== v) n.textContent = v; };
+    const wid = (id, p) => { const n = document.getElementById(id); if (n && n.style.width !== p + '%') n.style.width = p + '%'; };
     set('b-pmt', Math.round(U.pct(B.pMeter, B.pNeed)) + '%'); wid('b-pmf', U.pct(B.pMeter, B.pNeed));
     set('b-emt', Math.round(U.pct(B.eMeter, B.eNeed)) + '%'); wid('b-emf', U.pct(B.eMeter, B.eNeed));
     set('b-timer', U.durShort(B.t));
