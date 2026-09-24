@@ -19,45 +19,21 @@
       <button class="tab" type="button" data-auth-view="signup">Create account</button>
     </div>
     <form id="auth-login-form" class="auth-form">
-      <label class="fl" for="auth-identity">Email or username</label>
-      <input id="auth-identity" name="identity" autocomplete="username" maxlength="254" required placeholder="e.g. rook_7 or you@example.com">
+      <label class="fl" for="auth-login-username">Username</label>
+      <input id="auth-login-username" name="username" autocomplete="username" minlength="3" maxlength="18" required placeholder="Your username">
       <label class="fl" for="auth-login-password">Password</label>
-      <input id="auth-login-password" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="At least 12 characters">
+      <input id="auth-login-password" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="Your password">
       <button class="btn gold wide" type="submit">Enter Blackstone</button>
-      <button class="auth-link" type="button" data-auth-view="forgot">Forgot your password?</button>
-      <button class="auth-link" type="button" data-auth-view="resend">Resend verification email</button>
     </form>
     <form id="auth-signup-form" class="auth-form hidden">
       <label class="fl" for="auth-username">Username</label>
       <input id="auth-username" name="username" autocomplete="username" minlength="3" maxlength="18" pattern="[A-Za-z0-9_]{3,18}" required placeholder="3–18 letters, numbers, or _">
-      <label class="fl" for="auth-email">Email</label>
-      <input id="auth-email" name="email" type="email" autocomplete="email" maxlength="254" required placeholder="you@example.com">
       <label class="fl" for="auth-signup-password">Password</label>
       <input id="auth-signup-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="Use 12 or more characters">
       <button class="btn gold wide" type="submit">Create account</button>
-      <p class="tiny dimmer">We’ll email a verification link. Your email is never shown on your public profile.</p>
+      <p class="tiny dimmer">No email is collected. Choose a password you can keep safe; password recovery is not available.</p>
     </form>
-    <form id="auth-forgot-form" class="auth-form hidden">
-      <p class="small dim">Enter the email on your account. If it’s registered, we’ll send a reset link.</p>
-      <label class="fl" for="auth-forgot-email">Email</label>
-      <input id="auth-forgot-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
-      <button class="btn gold wide" type="submit">Send reset link</button>
-      <button class="auth-link" type="button" data-auth-view="login">Back to sign in</button>
-    </form>
-    <form id="auth-resend-form" class="auth-form hidden">
-      <p class="small dim">We’ll send a fresh verification link if the address has an unverified account.</p>
-      <label class="fl" for="auth-resend-email">Email</label>
-      <input id="auth-resend-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
-      <button class="btn gold wide" type="submit">Resend verification</button>
-      <button class="auth-link" type="button" data-auth-view="login">Back to sign in</button>
-    </form>
-    <form id="auth-reset-form" class="auth-form hidden">
-      <input type="hidden" name="token" id="auth-reset-token">
-      <label class="fl" for="auth-reset-password">New password</label>
-      <input id="auth-reset-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="Use 12 or more characters">
-      <button class="btn gold wide" type="submit">Reset password</button>
-    </form>
-    <div class="auth-foot">Single account · shared city · online saves</div>
+    <div class="auth-foot">Username + password · account-backed saves</div>
   </div>
 </section>
 
@@ -90,7 +66,7 @@
   <footer>
     <span id="foot-l">Day 1</span>
     <span id="foot-m"></span>
-    <span id="foot-r">Autosaves to your account · email stays private</span>
+    <span id="foot-r">Autosaves to your account · no email required</span>
   </footer>
 </div>
 

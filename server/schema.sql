@@ -2,8 +2,8 @@ CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL,
   username_key TEXT NOT NULL UNIQUE,
-  email TEXT NOT NULL,
-  email_key TEXT NOT NULL UNIQUE,
+  email TEXT UNIQUE,
+  email_key TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   verified_at TIMESTAMPTZ,
   verify_token_hash TEXT,
@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS users (
   reset_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL
 );
+
+-- Allow username-only signups while retaining any legacy email values privately.
+ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE users ALTER COLUMN email_key DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash TEXT PRIMARY KEY,

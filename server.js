@@ -7,15 +7,12 @@ const crypto = require('node:crypto');
 const { promisify } = require('node:util');
 const express = require('express');
 const helmet = require('helmet');
-const nodemailer = require('nodemailer');
 const { Server } = require('socket.io');
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 3000);
 const IS_PROD = process.env.NODE_ENV === 'production';
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
-const VERIFY_MS = 24 * 60 * 60 * 1000;
-const RESET_MS = 30 * 60 * 1000;
 const scryptAsync = promisify(crypto.scrypt);
 
 let pool;
@@ -67,30 +64,16 @@ const io = new Server(server, {
   }
 });
 
-const resendConfigured = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM);
-const smtpConfigured = Boolean(process.env.SMTP_HOST && process.env.SMTP_PORT &&
-  process.env.SMTP_USER && process.env.SMTP_PASS && process.env.SMTP_FROM);
-const mailProvider = resendConfigured ? 'resend' : smtpConfigured ? 'smtp' : null;
-const mailConfigured = Boolean(mailProvider);
-const mailer = smtpConfigured && !resendConfigured ? nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: Number(process.env.SMTP_PORT) === 465,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  connectionTimeout: 10000,
-  socketTimeout: 15000
-}) : null;
-
 const randomToken = () => crypto.randomBytes(32).toString('base64url');
 const hashToken = value => crypto.createHash('sha256').update(String(value)).digest('hex');
-const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-}[c]));
 const jsonError = (res, status, message) => res.status(status).json({ error: message });
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 async function initDatabase() {
   await pool.query(fs.readFileSync(path.join(ROOT, 'server', 'schema.sql'), 'utf8'));
+  // Retire legacy email verification/reset links; existing email addresses remain private and untouched.
+  await pool.query(`UPDATE users SET verify_token_hash=NULL,verify_expires_at=NULL,reset_token_hash=NULL,reset_expires_at=NULL
+    WHERE verify_token_hash IS NOT NULL OR verify_expires_at IS NOT NULL OR reset_token_hash IS NOT NULL OR reset_expires_at IS NOT NULL`);
 }
 
 async function hashPassword(password) {
@@ -135,9 +118,9 @@ function clearSessionCookie(res) {
 async function findSession(token) {
   if (!token) return null;
   const { rows } = await pool.query(
-    `SELECT u.id, u.username, u.email, u.verified_at
+    `SELECT u.id, u.username
        FROM sessions s JOIN users u ON u.id=s.user_id
-      WHERE s.token_hash=$1 AND s.expires_at > NOW() AND u.verified_at IS NOT NULL`,
+      WHERE s.token_hash=$1 AND s.expires_at > NOW()`,
     [hashToken(token)]
   );
   return rows[0] || null;
@@ -157,38 +140,6 @@ async function createSession(userId, res) {
     [hashToken(token), userId, new Date(now.getTime() + SESSION_MS), now]);
   setSessionCookie(res, token);
 }
-function originFor(req) {
-  const configured = process.env.APP_ORIGIN || process.env.RENDER_EXTERNAL_URL;
-  if (configured) return configured.replace(/\/$/, '');
-  if (IS_PROD) throw new Error('Set APP_ORIGIN (or deploy on Render with RENDER_EXTERNAL_URL) before sending account emails.');
-  return `${req.protocol}://${req.get('host')}`;
-}
-async function sendMail({ to, subject, text, html, devUrl }) {
-  if (resendConfigured) {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ from: process.env.RESEND_FROM, to: [to], subject, text, html }),
-      signal: AbortSignal.timeout(10000)
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail = typeof result.message === 'string' ? result.message : `HTTP ${response.status}`;
-      throw new Error(`Resend email API rejected the request: ${detail}`);
-    }
-    return result;
-  }
-  if (mailer) {
-    await mailer.sendMail({ from: process.env.SMTP_FROM, to, subject, text, html });
-    return;
-  }
-  if (IS_PROD) throw new Error('Email delivery is not configured. On Render Free, set RESEND_API_KEY and RESEND_FROM; otherwise configure SMTP on a plan that allows outbound SMTP.');
-  console.log(`\n[DEV EMAIL] To: ${to}\nSubject: ${subject}\n${devUrl || text}\n`);
-}
-
 /* Basic per-IP throttling, sufficient for the single-instance demo. */
 const buckets = new Map();
 function rateLimit({ max, windowMs }) {
@@ -223,89 +174,49 @@ app.use('/api', (req, res, next) => {
 
 app.get('/api/health', asyncRoute(async (_req, res) => {
   await pool.query('SELECT 1');
-  res.json({ ok: true, database: demoDb ? 'ephemeral-demo' : 'postgres', temporaryDatabase: process.env.DEMO_DATABASE === 'true', emailConfigured: mailConfigured, emailProvider: mailProvider });
+  res.json({ ok: true, database: demoDb ? 'ephemeral-demo' : 'postgres', temporaryDatabase: process.env.DEMO_DATABASE === 'true' });
 }));
 
 app.get('/api/auth/me', asyncRoute(async (req, res) => {
   const user = await findSession(getCookie(req, 'bsid'));
   if (!user) return res.json({ user: null, save: null });
   const { rows } = await pool.query('SELECT data FROM player_saves WHERE user_id=$1', [user.id]);
-  res.json({ user: { id: user.id, username: user.username, email: user.email }, save: rows[0]?.data || null });
+  res.json({ user: { id: user.id, username: user.username }, save: rows[0]?.data || null });
 }));
 
 app.post('/api/auth/signup', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  if (IS_PROD && !mailConfigured) return jsonError(res, 503, 'Email signup is unavailable until an email provider is configured. On Render Free, add Resend HTTPS API credentials in Render.');
   const username = String(req.body.username || '').trim();
-  const email = String(req.body.email || '').trim().toLowerCase();
   const password = String(req.body.password || '');
   if (!/^[A-Za-z0-9_]{3,18}$/.test(username)) return jsonError(res, 400, 'Username must be 3–18 characters using letters, numbers, or underscores.');
-  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError(res, 400, 'Enter a valid email address.');
   if (password.length < 12 || password.length > 128) return jsonError(res, 400, 'Password must be 12–128 characters.');
   const id = crypto.randomUUID();
-  const token = randomToken();
-  const tokenHash = hashToken(token);
-  const expires = new Date(Date.now() + VERIFY_MS);
   const created = new Date();
   const passwordHash = await hashPassword(password);
   try {
     await pool.query(
-      `INSERT INTO users (id,username,username_key,email,email_key,password_hash,verify_token_hash,verify_expires_at,created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [id, username, username.toLowerCase(), email, email, passwordHash, tokenHash, expires, created]
+      `INSERT INTO users (id,username,username_key,password_hash,verified_at,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, username, username.toLowerCase(), passwordHash, created, created]
     );
   } catch (err) {
-    if (err.code === '23505' || /unique|duplicate/i.test(err.message || '')) return jsonError(res, 409, 'That username or email is already registered.');
+    if (err.code === '23505' || /unique|duplicate/i.test(err.message || '')) return jsonError(res, 409, 'That username is already taken.');
     throw err;
   }
-  const link = `${originFor(req)}/api/auth/verify?token=${encodeURIComponent(token)}`;
-  const text = `Welcome to BLACKSTONE. Verify your email within 24 hours: ${link}`;
-  const html = `<p>Welcome to BLACKSTONE.</p><p><a href="${escapeHTML(link)}">Verify your email address</a>. This link expires in 24 hours.</p>`;
-  if (!IS_PROD && process.env.DEV_AUTO_VERIFY === '1') {
-    await pool.query('UPDATE users SET verified_at=$2,verify_token_hash=NULL,verify_expires_at=NULL WHERE id=$1', [id, new Date()]);
-    await createSession(id, res);
-    return res.status(201).json({ ok: true, verified: true, user: { id, username, email } });
-  }
-  await sendMail({ to: email, subject: 'Verify your BLACKSTONE account', text, html, devUrl: link });
-  res.status(201).json({ ok: true, message: 'Account created. Check your email for the verification link.' });
-}));
-
-app.post('/api/auth/resend-verification', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  if (IS_PROD && !mailConfigured) return jsonError(res, 503, 'Email signup is unavailable until an email provider is configured. On Render Free, add Resend HTTPS API credentials in Render.');
-  const email = String((req.body || {}).email || '').trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError(res, 400, 'Enter a valid email address.');
-  const { rows } = await pool.query('SELECT id,verified_at FROM users WHERE email_key=$1', [email]);
-  if (rows[0] && !rows[0].verified_at) {
-    const token = randomToken(), expires = new Date(Date.now() + VERIFY_MS);
-    await pool.query('UPDATE users SET verify_token_hash=$2,verify_expires_at=$3 WHERE id=$1', [rows[0].id, hashToken(token), expires]);
-    const link = `${originFor(req)}/api/auth/verify?token=${encodeURIComponent(token)}`;
-    await sendMail({ to: email, subject: 'Verify your BLACKSTONE account', text: `Verify your email within 24 hours: ${link}`, html: `<p><a href="${escapeHTML(link)}">Verify your BLACKSTONE account</a>. This link expires in 24 hours.</p>`, devUrl: link });
-  }
-  res.json({ ok: true, message: 'If that address has an unverified account, a fresh verification link has been sent.' });
-}));
-
-app.get('/api/auth/verify', rateLimit({ max: 20, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  const token = String(req.query.token || '');
-  if (token.length < 30 || token.length > 200) return res.redirect('/?verified=invalid');
-  const { rowCount } = await pool.query(
-    `UPDATE users SET verified_at=$2,verify_token_hash=NULL,verify_expires_at=NULL
-      WHERE verify_token_hash=$1 AND verify_expires_at > $2 AND verified_at IS NULL`,
-    [hashToken(token), new Date()]
-  );
-  res.redirect(rowCount ? '/?verified=1' : '/?verified=invalid');
+  await createSession(id, res);
+  res.status(201).json({ ok: true, user: { id, username } });
 }));
 
 app.post('/api/auth/login', rateLimit({ max: 10, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  const identity = String(req.body.identity || '').trim().toLowerCase();
+  const username = String(req.body.username || '').trim().toLowerCase();
   const password = String(req.body.password || '');
-  if (!identity || password.length > 128) return jsonError(res, 400, 'Enter your username/email and password.');
-  const { rows } = await pool.query('SELECT id,username,email,password_hash,verified_at FROM users WHERE username_key=$1 OR email_key=$1 LIMIT 1', [identity]);
+  if (!/^[a-z0-9_]{3,18}$/.test(username) || password.length > 128) return jsonError(res, 400, 'Enter your username and password.');
+  const { rows } = await pool.query('SELECT id,username,password_hash FROM users WHERE username_key=$1 LIMIT 1', [username]);
   const user = rows[0];
-  if (!user || !(await checkPassword(password, user.password_hash))) return jsonError(res, 401, 'Incorrect username/email or password.');
-  if (!user.verified_at) return jsonError(res, 403, 'Verify your email before signing in. Check your inbox for the verification link.');
+  if (!user || !(await checkPassword(password, user.password_hash))) return jsonError(res, 401, 'Incorrect username or password.');
   const old = getCookie(req, 'bsid');
   if (old) await pool.query('DELETE FROM sessions WHERE token_hash=$1', [hashToken(old)]);
   await createSession(user.id, res);
-  res.json({ ok: true, user: { id: user.id, username: user.username, email: user.email } });
+  res.json({ ok: true, user: { id: user.id, username: user.username } });
 }));
 
 app.post('/api/auth/logout', asyncRoute(async (req, res) => {
@@ -317,35 +228,6 @@ app.post('/api/auth/logout', asyncRoute(async (req, res) => {
   }
   clearSessionCookie(res);
   res.json({ ok: true });
-}));
-
-app.post('/api/auth/forgot', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  const email = String(req.body.email || '').trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError(res, 400, 'Enter a valid email address.');
-  if (IS_PROD && !mailConfigured) return jsonError(res, 503, 'Password reset email is unavailable until an email provider is configured.');
-  const { rows } = await pool.query('SELECT id FROM users WHERE email_key=$1 AND verified_at IS NOT NULL', [email]);
-  if (rows[0]) {
-    const token = randomToken(), expires = new Date(Date.now() + RESET_MS);
-    await pool.query('UPDATE users SET reset_token_hash=$2,reset_expires_at=$3 WHERE id=$1', [rows[0].id, hashToken(token), expires]);
-    const link = `${originFor(req)}/?reset=${encodeURIComponent(token)}`;
-    await sendMail({ to: email, subject: 'Reset your BLACKSTONE password', text: `Reset your password within 30 minutes: ${link}`, html: `<p><a href="${escapeHTML(link)}">Reset your BLACKSTONE password</a>. This link expires in 30 minutes.</p>`, devUrl: link });
-  }
-  res.json({ ok: true, message: 'If a verified account uses that email, password reset instructions have been sent.' });
-}));
-
-app.post('/api/auth/reset', rateLimit({ max: 5, windowMs: 15 * 60_000 }), asyncRoute(async (req, res) => {
-  const token = String(req.body.token || ''), password = String(req.body.password || '');
-  if (password.length < 12 || password.length > 128) return jsonError(res, 400, 'Password must be 12–128 characters.');
-  const passwordHash = await hashPassword(password);
-  const now = new Date();
-  const { rows } = await pool.query(
-    `UPDATE users SET password_hash=$2,reset_token_hash=NULL,reset_expires_at=NULL
-      WHERE reset_token_hash=$1 AND reset_expires_at > $3 AND verified_at IS NOT NULL RETURNING id`,
-    [hashToken(token), passwordHash, now]
-  );
-  if (!rows[0]) return jsonError(res, 400, 'That reset link is invalid or expired.');
-  await pool.query('DELETE FROM sessions WHERE user_id=$1', [rows[0].id]);
-  res.json({ ok: true, message: 'Password reset. Sign in with your new password.' });
 }));
 
 function safeSave(input) {
@@ -399,7 +281,7 @@ app.get('/api/players', requireAuth, asyncRoute(async (_req, res) => {
   const { rows } = await pool.query(
     `SELECT u.id,u.username,u.created_at,ps.data,ps.updated_at
        FROM users u JOIN player_saves ps ON ps.user_id=u.id
-      WHERE u.verified_at IS NOT NULL ORDER BY ps.updated_at DESC LIMIT 100`
+      ORDER BY ps.updated_at DESC LIMIT 100`
   );
   const profiles = rows.map(profileFrom).sort((a, b) => b.level - a.level || b.kills - a.kills || a.username.localeCompare(b.username));
   res.json({ players: profiles, total: profiles.length });
@@ -408,7 +290,7 @@ app.get('/api/players/:id', requireAuth, asyncRoute(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT u.id,u.username,u.created_at,ps.data,ps.updated_at
        FROM users u JOIN player_saves ps ON ps.user_id=u.id
-      WHERE u.id=$1 AND u.verified_at IS NOT NULL`, [req.params.id]
+      WHERE u.id=$1`, [req.params.id]
   );
   if (!rows[0]) return jsonError(res, 404, 'Player not found.');
   res.json({ player: profileFrom(rows[0]) });
@@ -425,7 +307,7 @@ app.get('/api/chat/recent', requireAuth, asyncRoute(async (_req, res) => {
 
 app.get('/api/messages/:playerId', requireAuth, asyncRoute(async (req, res) => {
   if (req.params.playerId === req.user.id) return jsonError(res, 400, 'Choose another player.');
-  const { rows: target } = await pool.query('SELECT id,username FROM users WHERE id=$1 AND verified_at IS NOT NULL', [req.params.playerId]);
+  const { rows: target } = await pool.query('SELECT id,username FROM users WHERE id=$1', [req.params.playerId]);
   if (!target[0]) return jsonError(res, 404, 'Player not found.');
   const { rows } = await pool.query(
     `SELECT m.id,m.sender_id,m.recipient_id,s.username AS sender_name,m.body,m.created_at
@@ -439,7 +321,7 @@ app.post('/api/messages/:playerId', requireAuth, rateLimit({ max: 30, windowMs: 
   const body = String(req.body.body || '').trim();
   if (!body || body.length > 500) return jsonError(res, 400, 'Message must be 1–500 characters.');
   if (req.params.playerId === req.user.id) return jsonError(res, 400, 'You cannot message yourself.');
-  const { rows: target } = await pool.query('SELECT id,username FROM users WHERE id=$1 AND verified_at IS NOT NULL', [req.params.playerId]);
+  const { rows: target } = await pool.query('SELECT id,username FROM users WHERE id=$1', [req.params.playerId]);
   if (!target[0]) return jsonError(res, 404, 'Player not found.');
   const id = crypto.randomUUID(), createdAt = new Date();
   await pool.query('INSERT INTO direct_messages (id,sender_id,recipient_id,body,created_at) VALUES ($1,$2,$3,$4,$5)',
@@ -536,7 +418,6 @@ app.use((err, _req, res, _next) => {
 initDatabase().then(() => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`BLACKSTONE online listening on 0.0.0.0:${PORT}${demoDb ? ' (ephemeral in-memory database)' : ''}`);
-    if (!mailConfigured) console.warn('Email delivery is not configured: set RESEND_API_KEY and RESEND_FROM or configure SMTP.');
   });
 }).catch(err => {
   console.error('Database initialization failed:', err);

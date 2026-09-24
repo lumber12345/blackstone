@@ -14,7 +14,6 @@
     connected: false,
     demoDb: false,
     temporaryDb: false,
-    emailConfigured: false,
     saveTimer: null,
     saving: false,
     saveAgain: false,
@@ -40,14 +39,9 @@
     showAuthView(name) {
       const forms = {
         login: document.getElementById('auth-login-form'),
-        signup: document.getElementById('auth-signup-form'),
-        forgot: document.getElementById('auth-forgot-form'),
-        resend: document.getElementById('auth-resend-form'),
-        reset: document.getElementById('auth-reset-form')
+        signup: document.getElementById('auth-signup-form')
       };
       Object.entries(forms).forEach(([key, form]) => { if (form) form.classList.toggle('hidden', key !== name); });
-      const tabs = document.getElementById('auth-tabs');
-      if (tabs) tabs.classList.toggle('hidden', name === 'forgot' || name === 'resend' || name === 'reset');
       document.querySelectorAll('[data-auth-view]').forEach(b => b.classList.toggle('on', b.dataset.authView === name));
     },
 
@@ -58,15 +52,13 @@
       });
       const login = document.getElementById('auth-login-form');
       const signup = document.getElementById('auth-signup-form');
-      const forgot = document.getElementById('auth-forgot-form');
-      const reset = document.getElementById('auth-reset-form');
       if (login) login.addEventListener('submit', async ev => {
         ev.preventDefault();
         const form = new FormData(login);
         const submit = login.querySelector('[type="submit"]');
         submit.disabled = true; submit.textContent = 'Signing in…';
         try {
-          await this.api('/api/auth/login', { method: 'POST', body: JSON.stringify({ identity: form.get('identity'), password: form.get('password') }) });
+          await this.api('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) });
           const me = await this.api('/api/auth/me');
           this.showNotice('', '');
           this.authenticated(me);
@@ -79,61 +71,13 @@
         const submit = signup.querySelector('[type="submit"]');
         submit.disabled = true; submit.textContent = 'Creating account…';
         try {
-          const result = await this.api('/api/auth/signup', { method: 'POST', body: JSON.stringify({ username: form.get('username'), email: form.get('email'), password: form.get('password') }) });
-          if (result.verified) {
-            const me = await this.api('/api/auth/me');
-            this.authenticated(me);
-          } else {
-            this.showAuthView('login');
-            this.showNotice(result.message || 'Check your inbox to verify your account.', 'good');
-          }
+          await this.api('/api/auth/signup', { method: 'POST', body: JSON.stringify({ username: form.get('username'), password: form.get('password') }) });
+          const me = await this.api('/api/auth/me');
+          this.showNotice('', '');
+          this.authenticated(me);
         } catch (err) { this.showNotice(err.message, 'bad'); }
         finally { submit.disabled = false; submit.textContent = 'Create account'; }
       });
-      if (forgot) forgot.addEventListener('submit', async ev => {
-        ev.preventDefault();
-        const email = new FormData(forgot).get('email');
-        const submit = forgot.querySelector('[type="submit"]');
-        submit.disabled = true; submit.textContent = 'Sending…';
-        try {
-          const result = await this.api('/api/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) });
-          this.showNotice(result.message, 'good');
-        } catch (err) { this.showNotice(err.message, 'bad'); }
-        finally { submit.disabled = false; submit.textContent = 'Send reset link'; }
-      });
-      const resend = document.getElementById('auth-resend-form');
-      if (resend) resend.addEventListener('submit', async ev => {
-        ev.preventDefault();
-        const email = new FormData(resend).get('email');
-        const submit = resend.querySelector('[type="submit"]');
-        submit.disabled = true; submit.textContent = 'Sending…';
-        try {
-          const result = await this.api('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
-          this.showNotice(result.message, 'good');
-        } catch (err) { this.showNotice(err.message, 'bad'); }
-        finally { submit.disabled = false; submit.textContent = 'Resend verification'; }
-      });
-      if (reset) reset.addEventListener('submit', async ev => {
-        ev.preventDefault();
-        const form = new FormData(reset);
-        const submit = reset.querySelector('[type="submit"]');
-        submit.disabled = true; submit.textContent = 'Resetting…';
-        try {
-          const result = await this.api('/api/auth/reset', { method: 'POST', body: JSON.stringify({ token: form.get('token'), password: form.get('password') }) });
-          this.showAuthView('login');
-          this.showNotice(result.message, 'good');
-          history.replaceState({}, '', location.pathname);
-        } catch (err) { this.showNotice(err.message, 'bad'); }
-        finally { submit.disabled = false; submit.textContent = 'Reset password'; }
-      });
-      const params = new URLSearchParams(location.search);
-      if (params.get('verified') === '1') this.showNotice('Email verified. Sign in to enter the city.', 'good');
-      else if (params.get('verified') === 'invalid') this.showNotice('That verification link is invalid or expired. Ask for a fresh one.', 'bad');
-      if (params.has('reset')) {
-        document.getElementById('auth-reset-token').value = params.get('reset');
-        this.showAuthView('reset');
-        this.showNotice('Choose a new password for your account.', '');
-      }
     },
 
     async bootstrap() {
@@ -143,13 +87,8 @@
         const health = await this.api('/api/health');
         this.demoDb = health.database === 'ephemeral-demo';
         this.temporaryDb = Boolean(health.temporaryDatabase);
-        this.emailConfigured = Boolean(health.emailConfigured);
-        const params = new URLSearchParams(location.search);
-        if (me.user && !params.has('reset')) this.authenticated(me);
-        else if (params.has('reset')) { /* reset form was opened in bindAuth */ }
-        else if (location.search.includes('verified=')) { /* verification notice is set in bindAuth */ }
+        if (me.user) this.authenticated(me);
         else if (this.demoDb) this.showNotice('Local preview only: accounts and saves reset when the server restarts.', '');
-        else if (!this.emailConfigured) this.showNotice(`Email delivery is not configured yet. Existing players can sign in, but new signup and password reset are disabled.${this.temporaryDb ? ' The demo database also expires after 30 days; upgrade it to retain accounts.' : ''}`, 'bad');
         else if (this.temporaryDb) this.showNotice('Demo database: upgrade Render Free Postgres before its 30-day expiry to retain accounts and saves.', '');
         else this.showNotice('', '');
       } catch (err) {
