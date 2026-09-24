@@ -1,0 +1,20 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# dependencies & builds (the game itself has none)
+node_modules/
+package-lock.json
+dist/
+build/
+
+# local play data — saves live in the browser, never in git
+*.save.txt
+blackstone-save.txt
+saves/
+
+# test harness scratch
+/tests/out/
+coverage/

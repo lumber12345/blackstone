@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BLACKSTONE — a text-based city RPG</title>
+<meta name="description" content="A single-player, text-based city RPG in the tradition of Torn: train stats, commit crimes, fight in the streets, work jobs, and climb from the gutter to the Kingpin.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f0b429'/%3E%3Ctext x='16' y='23' font-size='17' font-family='monospace' font-weight='bold' text-anchor='middle' fill='%230b0f15'%3EBS%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app" class="app">
+
+  <header id="hdr">
+    <div class="brand">
+      <div class="logo">BS</div>
+      <div class="brand-txt">
+        <h1>BLACKSTONE</h1>
+        <p id="tagline">underbelly of the city</p>
+      </div>
+    </div>
+    <div id="bars"></div>
+    <div class="hdr-right">
+      <div class="cash"><span id="cash">$0</span><small>on hand</small></div>
+      <div class="hdr-btns">
+        <button class="btn tiny ghost" id="btn-save" title="Save now">💾 Save</button>
+        <button class="btn tiny ghost" id="btn-help" title="How to play">❔ Help</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav id="nav"></nav>
+    <main id="main"></main>
+  </div>
+
+  <footer>
+    <span id="foot-l">Day 1</span>
+    <span id="foot-m"></span>
+    <span id="foot-r">Autosaves locally · nothing leaves your browser</span>
+  </footer>
+
+</div>
+
+<div id="toasts"></div>
+<div id="modal-root" class="hidden"></div>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
